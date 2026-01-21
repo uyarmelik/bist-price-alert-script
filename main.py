@@ -3,10 +3,12 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
+import json
 
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 RECEIVER_EMAIL = os.environ.get("RECEIVER_EMAIL")
+STATE_FILE = "stock_states.json"
 
 tickers = [
     "AEFES.IS",
@@ -105,15 +107,30 @@ tickers = [
     "VAKBN.IS",
     "YEOTK.IS",
     "YKBNK.IS",
-    "ZOREN.IS"
+    "ZOREN.IS",
 ]
 
 
-def send_email(alert_message):
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+
+def save_state(states):
+    with open(STATE_FILE, "w") as f:
+        json.dump(states, f)
+
+
+def send_email(subject, alert_message):
     msg = MIMEMultipart()
     msg["From"] = EMAIL_USER
     msg["To"] = RECEIVER_EMAIL
-    msg["Subject"] = "🚨 BIST Stock Alert: Price Drop Detected"
+    msg["Subject"] = subject
 
     msg.attach(MIMEText(alert_message, "plain"))
 
@@ -130,6 +147,9 @@ def send_email(alert_message):
 
 def check_stocks():
     alerts = []
+    current_states = load_state()
+    new_states = current_states.copy()
+
     print("Checking stocks...")
 
     for symbol in tickers:
@@ -144,28 +164,43 @@ def check_stocks():
             yearly_avg = hist["Close"].mean()
             threshold = yearly_avg * 0.80
 
-            if current_price < threshold:
+            is_below_threshold = current_price < threshold
+            was_below_threshold = current_states.get(symbol, False)
+
+            if is_below_threshold and not was_below_threshold:
                 diff = ((yearly_avg - current_price) / yearly_avg) * 100
                 info = (
-                    f"⚠️ STOCK: {symbol}\n"
+                    f"🔻 DROP ALERT: {symbol}\n"
                     f"   Price: {current_price:.2f} TL\n"
                     f"   Yearly Avg: {yearly_avg:.2f} TL\n"
-                    f"   Drop: %{diff:.2f} below average!\n"
+                    f"   Status: {diff:.2f}% below average!\n"
                     f"--------------------------------"
                 )
                 alerts.append(info)
+                new_states[symbol] = True
 
-        except Exception:
+            elif not is_below_threshold and was_below_threshold:
+                info = (
+                    f"✅ RECOVERY ALERT: {symbol}\n"
+                    f"   Price: {current_price:.2f} TL\n"
+                    f"   Yearly Avg: {yearly_avg:.2f} TL\n"
+                    f"   Status: Climbed back above the 20% threshold.\n"
+                    f"--------------------------------"
+                )
+                alerts.append(info)
+                new_states[symbol] = False
+
+        except Exception as e:
+            print(f"Error checking {symbol}: {e}")
             continue
 
     if alerts:
-        full_text = (
-            "The following stocks have dropped 20% below their yearly average:\n\n"
-            + "\n".join(alerts)
-        )
-        send_email(full_text)
+        full_text = "Stock status changes detected:\n\n" + "\n".join(alerts)
+        send_email("🚨 BIST Status Change Alert", full_text)
     else:
-        print("No stocks found matching criteria.")
+        print("No status changes found.")
+
+    save_state(new_states)
 
 
 if __name__ == "__main__":
