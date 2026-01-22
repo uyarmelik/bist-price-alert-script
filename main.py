@@ -174,8 +174,8 @@ def check_stocks():
             was_below_avg = prev_state.get("avg_below", False)
             was_below_max = prev_state.get("max_below", False)
 
-            is_below_avg = current_price < avg_threshold
-            is_below_max = current_price < max_threshold
+            is_below_avg = bool(current_price < avg_threshold)
+            is_below_max = bool(current_price < max_threshold)
 
             new_states[symbol] = {"avg_below": is_below_avg, "max_below": is_below_max}
 
