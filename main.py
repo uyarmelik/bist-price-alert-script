@@ -4,111 +4,32 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
 import json
+import sys
 
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 RECEIVER_EMAIL = os.environ.get("RECEIVER_EMAIL")
-STATE_FILE = "stock_states.json"
 
-tickers = [
-    "AEFES.IS",
-    "AGHOL.IS",
-    "AKBNK.IS",
-    "AKSA.IS",
-    "AKSEN.IS",
-    "ALARK.IS",
-    "ALTNY.IS",
-    "ANSGR.IS",
-    "ARCLK.IS",
-    "ASELS.IS",
-    "ASTOR.IS",
-    "BALSU.IS",
-    "BIMAS.IS",
-    "BRSAN.IS",
-    "BRYAT.IS",
-    "BSOKE.IS",
-    "BTCIM.IS",
-    "CANTE.IS",
-    "CCOLA.IS",
-    "CIMSA.IS",
-    "CWENE.IS",
-    "DAPGM.IS",
-    "DOAS.IS",
-    "DOHOL.IS",
-    "DSTKF.IS",
-    "ECILC.IS",
-    "EFOR.IS",
-    "EGEEN.IS",
-    "EKGYO.IS",
-    "ENERY.IS",
-    "ENJSA.IS",
-    "ENKAI.IS",
-    "EREGL.IS",
-    "EUPWR.IS",
-    "FROTO.IS",
-    "GARAN.IS",
-    "GENIL.IS",
-    "GESAN.IS",
-    "GLRMK.IS",
-    "GRSEL.IS",
-    "GRTHO.IS",
-    "GUBRF.IS",
-    "HALKB.IS",
-    "HEKTS.IS",
-    "ISCTR.IS",
-    "ISMEN.IS",
-    "IZENR.IS",
-    "KCAER.IS",
-    "KCHOL.IS",
-    "KLRHO.IS",
-    "KONTR.IS",
-    "KRDMD.IS",
-    "KTLEV.IS",
-    "KUYAS.IS",
-    "MAGEN.IS",
-    "MAVI.IS",
-    "MGROS.IS",
-    "MIATK.IS",
-    "MPARK.IS",
-    "OBAMS.IS",
-    "ODAS.IS",
-    "OTKAR.IS",
-    "OYAKC.IS",
-    "PASEU.IS",
-    "PATEK.IS",
-    "PETKM.IS",
-    "PGSUS.IS",
-    "QUAGR.IS",
-    "RALYH.IS",
-    "REEDR.IS",
-    "SAHOL.IS",
-    "SASA.IS",
-    "SISE.IS",
-    "SKBNK.IS",
-    "SOKM.IS",
-    "TABGD.IS",
-    "TAVHL.IS",
-    "TCELL.IS",
-    "THYAO.IS",
-    "TKFEN.IS",
-    "TOASO.IS",
-    "TRALT.IS",
-    "TRENJ.IS",
-    "TRMET.IS",
-    "TSKB.IS",
-    "TSPOR.IS",
-    "TTKOM.IS",
-    "TTRAK.IS",
-    "TUKAS.IS",
-    "TUPRS.IS",
-    "TUREX.IS",
-    "TURSG.IS",
-    "ULKER.IS",
-    "VAKBN.IS",
-    "YEOTK.IS",
-    "YKBNK.IS",
-    "ZOREN.IS",
-]
+STATE_FILE = "stock_states.json"
+CONFIG_FILE = "config.json"
+
+
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        print(f"ERROR: {CONFIG_FILE} not found! Please create the file.")
+        return {"tickers": [], "target_prices": {}}
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"ERROR: An error occurred while reading the config file: {e}")
+        return {"tickers": [], "target_prices": {}}
+
+
+config_data = load_config()
+tickers = config_data.get("tickers", [])
+TARGET_PRICES = config_data.get("target_prices", {})
 
 
 def load_state():
@@ -127,6 +48,10 @@ def save_state(states):
 
 
 def send_email(subject, alert_message):
+    if not EMAIL_USER or not EMAIL_PASS or not RECEIVER_EMAIL:
+        print("Email credentials not set. Skipping email.")
+        return
+
     msg = MIMEMultipart()
     msg["From"] = EMAIL_USER
     msg["To"] = RECEIVER_EMAIL
@@ -140,18 +65,24 @@ def send_email(subject, alert_message):
         server.login(EMAIL_USER, EMAIL_PASS)
         server.sendmail(EMAIL_USER, RECEIVER_EMAIL, msg.as_string())
         server.quit()
-        print("Email sent successfully.")
+        print(f"Email sent: {subject}")
     except Exception as e:
         print(f"Error sending email: {e}")
 
 
 def check_stocks():
+    if not tickers:
+        print("Stock watchlist is empty. Verify the config.json file.")
+        return
+
     avg_alerts = []
     max_alerts = []
+    custom_alerts = []
+
     current_states = load_state()
     new_states = {}
 
-    print("Checking stocks...")
+    print(f"Checking {len(tickers)} stocks from config...")
 
     for symbol in tickers:
         try:
@@ -164,6 +95,7 @@ def check_stocks():
             current_price = hist["Close"].iloc[-1]
             yearly_avg = hist["Close"].mean()
             yearly_max = hist["Close"].max()
+
             avg_threshold = yearly_avg * 0.80
             max_threshold = yearly_max * 0.70
 
@@ -177,65 +109,79 @@ def check_stocks():
             is_below_avg = bool(current_price < avg_threshold)
             is_below_max = bool(current_price < max_threshold)
 
-            new_states[symbol] = {"avg_below": is_below_avg, "max_below": is_below_max}
+            new_states[symbol] = {
+                "avg_below": is_below_avg,
+                "max_below": is_below_max,
+                "custom_low_below": prev_state.get("custom_low_below", False),
+                "custom_high_above": prev_state.get("custom_high_above", False),
+            }
 
             if is_below_avg and not was_below_avg:
                 diff = ((yearly_avg - current_price) / yearly_avg) * 100
-                info = (
-                    f"🔻 DROP ALERT: {symbol}\n"
-                    f"   Price: {current_price:.2f} TL\n"
-                    f"   Yearly Avg: {yearly_avg:.2f} TL\n"
-                    f"   Status: {diff:.2f}% below average!\n"
-                    f"--------------------------------"
+                avg_alerts.append(
+                    f"🔻 DROP (AVG): {symbol} is {diff:.2f}% below yearly avg. Price: {current_price:.2f}"
                 )
-                avg_alerts.append(info)
 
             elif not is_below_avg and was_below_avg:
-                info = (
-                    f"✅ RECOVERY ALERT: {symbol}\n"
-                    f"   Price: {current_price:.2f} TL\n"
-                    f"   Yearly Avg: {yearly_avg:.2f} TL\n"
-                    f"   Status: Climbed back above the 20% threshold.\n"
-                    f"--------------------------------"
+                avg_alerts.append(
+                    f"🚀 RECOVERY (AVG): {symbol} recovered above yearly avg threshold. Price: {current_price:.2f}"
                 )
-                avg_alerts.append(info)
 
             if is_below_max and not was_below_max:
                 diff = ((yearly_max - current_price) / yearly_max) * 100
-                info = (
-                    f"📉 DROP ALERT: {symbol}\n"
-                    f"   Price: {current_price:.2f} TL\n"
-                    f"   Yearly Max: {yearly_max:.2f} TL\n"
-                    f"   Status: {diff:.2f}% below yearly maximum!\n"
-                    f"--------------------------------"
+                max_alerts.append(
+                    f"🔻 DROP (MAX): {symbol} is {diff:.2f}% below yearly max. Price: {current_price:.2f}"
                 )
-                max_alerts.append(info)
 
             elif not is_below_max and was_below_max:
-                info = (
-                    f"🚀 RECOVERY ALERT: {symbol}\n"
-                    f"   Price: {current_price:.2f} TL\n"
-                    f"   Yearly Max: {yearly_max:.2f} TL\n"
-                    f"   Status: Climbed back above the 30% max threshold.\n"
-                    f"--------------------------------"
+                max_alerts.append(
+                    f"🚀 RECOVERY (MAX): {symbol} recovered above yearly max threshold. Price: {current_price:.2f}"
                 )
-                max_alerts.append(info)
+
+            if symbol in TARGET_PRICES:
+                targets = TARGET_PRICES[symbol]
+                low_limit = targets.get("low")
+                high_limit = targets.get("high")
+
+                was_below_custom_low = prev_state.get("custom_low_below", False)
+                was_above_custom_high = prev_state.get("custom_high_above", False)
+
+                if low_limit:
+                    is_below_custom_low = bool(current_price < low_limit)
+                    new_states[symbol]["custom_low_below"] = is_below_custom_low
+
+                    if is_below_custom_low and not was_below_custom_low:
+                        custom_alerts.append(
+                            f"🔻 CUSTOM LOW ALERT: {symbol} dropped below {low_limit} TL. Current: {current_price:.2f}"
+                        )
+                    elif not is_below_custom_low and was_below_custom_low:
+                        custom_alerts.append(
+                            f"🚀 CUSTOM RECOVERY: {symbol} rose back above {low_limit} TL. Current: {current_price:.2f}"
+                        )
+
+                if high_limit:
+                    is_above_custom_high = bool(current_price > high_limit)
+                    new_states[symbol]["custom_high_above"] = is_above_custom_high
+
+                    if is_above_custom_high and not was_above_custom_high:
+                        custom_alerts.append(
+                            f"🚀 CUSTOM HIGH ALERT: {symbol} rose above {high_limit} TL. Current: {current_price:.2f}"
+                        )
+                    elif not is_above_custom_high and was_above_custom_high:
+                        custom_alerts.append(
+                            f"🔻 CUSTOM PULLBACK: {symbol} dropped back below {high_limit} TL. Current: {current_price:.2f}"
+                        )
 
         except Exception as e:
             print(f"Error checking {symbol}: {e}")
             continue
 
     if avg_alerts:
-        full_text = "Stock status changes (Average-based):\n\n" + "\n".join(avg_alerts)
-        send_email("🚨 BIST Average Alert", full_text)
-    else:
-        print("No average-based status changes found.")
-
+        send_email("🚨 BIST Average Alert", "\n".join(avg_alerts))
     if max_alerts:
-        full_text = "Stock status changes (Max-based):\n\n" + "\n".join(max_alerts)
-        send_email("📉 BIST Max Drop Alert", full_text)
-    else:
-        print("No max-based status changes found.")
+        send_email("📉 BIST Max Drop Alert", "\n".join(max_alerts))
+    if custom_alerts:
+        send_email("🎯 BIST Custom Price Alert", "\n\n".join(custom_alerts))
 
     save_state(new_states)
 
