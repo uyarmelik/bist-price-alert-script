@@ -123,9 +123,7 @@ def check_stocks():
                 )
 
             elif not is_below_avg and was_below_avg:
-                avg_alerts.append(
-                    f"🚀 RECOVERY (AVG): {symbol} recovered above yearly avg threshold. Price: {current_price:.2f}"
-                )
+                pass
 
             if is_below_max and not was_below_max:
                 diff = ((yearly_max - current_price) / yearly_max) * 100
@@ -134,9 +132,7 @@ def check_stocks():
                 )
 
             elif not is_below_max and was_below_max:
-                max_alerts.append(
-                    f"🚀 RECOVERY (MAX): {symbol} recovered above yearly max threshold. Price: {current_price:.2f}"
-                )
+                pass
 
             if symbol in TARGET_PRICES:
                 targets = TARGET_PRICES[symbol]
